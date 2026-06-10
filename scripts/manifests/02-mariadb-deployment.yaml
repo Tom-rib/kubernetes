@@ -1,0 +1,130 @@
+---
+# PersistentVolume pour MariaDB
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-mariadb
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/mnt/storage/mariadb"
+
+---
+# PersistentVolumeClaim pour MariaDB
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-mariadb
+  namespace: apps
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+# Secret pour MariaDB
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mariadb-secret
+  namespace: apps
+type: Opaque
+stringData:
+  root-password: "root123"
+  database-name: "appdb"
+  database-user: "appuser"
+  database-password: "apppass123"
+
+---
+# Deployment MariaDB HA
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mariadb-ha
+  namespace: apps
+  labels:
+    app: mariadb
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3306
+          name: mysql
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: root-password
+        - name: MYSQL_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: database-name
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: database-user
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: database-password
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 512Mi
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+        livenessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - mysqladmin ping -h localhost
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: pvc-mariadb
+
+---
+# Service ClusterIP pour MariaDB
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb-service
+  namespace: apps
+  labels:
+    app: mariadb
+spec:
+  type: ClusterIP
+  selector:
+    app: mariadb
+  ports:
+  - name: mysql
+    protocol: TCP
+    port: 3306
+    targetPort: 3306

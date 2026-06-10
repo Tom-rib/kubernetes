@@ -1,0 +1,117 @@
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apps
+
+---
+# PersistentVolume pour Nginx
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-nginx
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteMany
+  hostPath:
+    path: "/mnt/storage/nginx"
+
+---
+# PersistentVolumeClaim pour Nginx
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-nginx
+  namespace: apps
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+# ConfigMap pour Nginx
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: apps
+data:
+  WORKER_PROCESSES: "4"
+  WORKER_CONNECTIONS: "1024"
+
+---
+# Deployment Nginx HA
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-ha
+  namespace: apps
+  labels:
+    app: nginx
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+          name: http
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        volumeMounts:
+        - name: html
+          mountPath: /usr/share/nginx/html
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: html
+        persistentVolumeClaim:
+          claimName: pvc-nginx
+
+---
+# Service LoadBalancer pour Nginx
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+  namespace: apps
+  labels:
+    app: nginx
+spec:
+  type: LoadBalancer
+  selector:
+    app: nginx
+  ports:
+  - name: http
+    protocol: TCP
+    port: 80
+    targetPort: 80

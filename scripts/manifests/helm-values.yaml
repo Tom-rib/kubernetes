@@ -1,0 +1,345 @@
+# helm-values.yaml
+# Fichier de configuration personnalisée pour les charts Helm Bitnami
+
+---
+# ========== NGINX VALUES ==========
+# Utilisation : helm install my-nginx bitnami/nginx -f helm-values.yaml -n apps
+
+nginx:
+  # Nombre de replicas
+  replicaCount: 3
+  
+  # Image Docker
+  image:
+    registry: docker.io
+    repository: bitnami/nginx
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  # Service
+  service:
+    type: LoadBalancer
+    port: 80
+    targetPort: 8080
+    nodePort: 30080
+  
+  # Ressources
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 100m
+      memory: 64Mi
+  
+  # Health checks
+  livenessProbe:
+    enabled: true
+    httpGet:
+      path: /
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 10
+  
+  readinessProbe:
+    enabled: true
+    httpGet:
+      path: /
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 5
+  
+  # Persistence
+  persistence:
+    enabled: true
+    size: 5Gi
+    mountPath: /usr/share/nginx/html
+  
+  # Configuration
+  serverBlock: |-
+    server {
+      listen 8080;
+      server_name _;
+      location / {
+        root /usr/share/nginx/html;
+        index index.html;
+      }
+    }
+
+---
+# ========== APACHE VALUES ==========
+# Utilisation : helm install my-apache bitnami/apache -f helm-values.yaml -n apps
+
+apache:
+  # Nombre de replicas
+  replicaCount: 2
+  
+  # Image Docker
+  image:
+    registry: docker.io
+    repository: bitnami/apache
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  # Service
+  service:
+    type: LoadBalancer
+    port: 80
+    targetPort: 8080
+    nodePort: 30081
+  
+  # Ressources
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 100m
+      memory: 64Mi
+  
+  # Health checks
+  livenessProbe:
+    enabled: true
+    httpGet:
+      path: /
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 10
+  
+  readinessProbe:
+    enabled: true
+    httpGet:
+      path: /
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 5
+  
+  # Configuration
+  htdocsContent: |-
+    <html>
+      <head><title>Apache Server</title></head>
+      <body>
+        <h1>Welcome to Apache</h1>
+        <p>This is served from Kubernetes</p>
+      </body>
+    </html>
+
+---
+# ========== MARIADB VALUES ==========
+# Utilisation : helm install my-mariadb bitnami/mariadb -f helm-values.yaml -n apps
+
+mariadb:
+  # Mode
+  architecture: standalone  # ou 'replication' pour HA
+  
+  # Nombre de replicas (pour replication)
+  replicaCount: 1
+  
+  # Image Docker
+  image:
+    registry: docker.io
+    repository: bitnami/mariadb
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  # Authentication
+  auth:
+    rootPassword: "root123"
+    database: "appdb"
+    username: "appuser"
+    password: "apppass123"
+  
+  # Service
+  service:
+    type: ClusterIP
+    port: 3306
+    targetPort: 3306
+  
+  # Ressources
+  primary:
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+  
+  # Persistence
+  primary:
+    persistence:
+      enabled: true
+      size: 10Gi
+      mountPath: /var/lib/mysql
+  
+  # Configuration
+  primary:
+    configuration: |-
+      [mysqld]
+      default_storage_engine=InnoDB
+      bind_address=0.0.0.0
+      port=3306
+      max_allowed_packet=256M
+      max_connections=1000
+      log_bin=mysql-bin
+      server_id=1
+  
+  # Metrics
+  metrics:
+    enabled: false
+    serviceMonitor:
+      enabled: false
+
+---
+# ========== CONFIGMAP POUR NGINX ==========
+nginx-configmap:
+  name: nginx-config
+  namespace: apps
+  data:
+    WORKER_PROCESSES: "4"
+    WORKER_CONNECTIONS: "1024"
+    KEEPALIVE_TIMEOUT: "65"
+    CLIENT_BODY_SIZE: "20M"
+
+---
+# ========== SECRET POUR MARIADB ==========
+mariadb-secret:
+  name: mariadb-credentials
+  namespace: apps
+  data:
+    root-password: "root123"
+    database-name: "appdb"
+    database-user: "appuser"
+    database-password: "apppass123"
+
+---
+# ========== INGRESS (Optionnel) ==========
+# À activer si vous avez un ingress controller
+
+ingress:
+  enabled: false
+  className: "nginx"  # ou votre ingress controller
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: nginx.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: apache.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: nginx-tls
+      hosts:
+        - nginx.example.com
+    - secretName: apache-tls
+      hosts:
+        - apache.example.com
+
+---
+# ========== AUTOSCALING (Optionnel) ==========
+# À activer si vous avez un metrics-server
+
+autoscaling:
+  nginx:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 80
+  
+  apache:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 80
+
+---
+# ========== AFFINITY (Optionnel) ==========
+# Pour distribuer les pods sur différents nœuds
+
+affinity:
+  # Pod anti-affinity : éviter que 2 nginx soient sur le même nœud
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - nginx
+          topologyKey: kubernetes.io/hostname
+
+---
+# ========== NETWORK POLICY (Optionnel) ==========
+# Pour restreindre le trafic réseau
+
+networkPolicy:
+  enabled: false
+  
+  # Bloquer le trafic entrant sauf pour les services
+  policyTypes:
+    - Ingress
+    - Egress
+  
+  # Autoriser le trafic depuis les services
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: apps
+  
+  # Autoriser le trafic sortant vers MariaDB
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: mariadb
+      ports:
+        - protocol: TCP
+          port: 3306
+
+---
+# ========== PDB (Pod Disruption Budget) ==========
+# Optionnel : garantir un nombre minimum de pods disponibles
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # ou
+  # maxUnavailable: 1
+
+---
+# ========== NOTES D'UTILISATION ==========
+# 
+# Installation avec ce fichier :
+#
+# 1. Nginx :
+#    helm install my-nginx bitnami/nginx -f helm-values.yaml -n apps
+#
+# 2. Apache :
+#    helm install my-apache bitnami/apache -f helm-values.yaml -n apps
+#
+# 3. MariaDB :
+#    helm install my-mariadb bitnami/mariadb -f helm-values.yaml -n apps
+#
+# 4. Tous ensemble (créer un script) :
+#    for app in nginx apache mariadb; do
+#      helm install my-$app bitnami/$app -f helm-values.yaml -n apps
+#    done
+#
+# Mettre à jour une release :
+#    helm upgrade my-nginx bitnami/nginx -f helm-values.yaml -n apps
+#
+# Voir les valeurs appliquées :
+#    helm get values my-nginx -n apps
+#
+# Rollback à une version antérieure :
+#    helm rollback my-nginx 1 -n apps
+#
+# Supprimer une release :
+#    helm uninstall my-nginx -n apps

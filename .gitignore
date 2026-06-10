@@ -1,0 +1,30 @@
+# Kubernetes
+*.kubeconfig
+.kube/
+kubeconfig
+
+# Logs
+logs/
+*.log
+
+# Secrets
+**/secrets.yaml
+**/secret*.yaml
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project
+/tmp/
+/temp/
+*.backup
