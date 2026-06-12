@@ -197,39 +197,14 @@ Consultez [`05_annexes.md`](./05_annexes.md) pour :
 - 📊 Monitoring et logs
 - 🛠️ Mémos rapides
 
----
-
-## ✅ Checklist de progression
-
-- [ ] VMs Debian créées et configurées
-- [ ] K3S installé sur les 3 VMs
-- [ ] Cluster formé (1 master + 2 workers)
-- [ ] Applications déployées (nginx, Apache, MariaDB)
-- [ ] Haute disponibilité testée
-- [ ] Stockage persistant configuré
-- [ ] ConfigMaps et Secrets déployés
-- [ ] RBAC implémenté
-- [ ] Helm fonctionnel
-- [ ] Comparaison K3S/Docker rédigée
-- [ ] Présentation préparée
-
----
-
-## 📝 Notes importantes
-
-⚠️ **Lire complètement cet README avant de commencer !**  
-⚠️ **Documenter chaque commande exécutée** (créer un journal de bord)  
-⚠️ **Tester chaque étape** avant de passer à la suivante  
-⚠️ **Sauvegarder vos configurations** (fichiers YAML, scripts)  
 
 ---
 
 ## 📅 Dernière mise à jour
 Juin 2026 - Documentation pour niveau L2 Admin Sys & Réseaux
 
-**Auteur** : [Votre nom]  
-**Classe** : [Votre classe]  
-**Durée du projet** : X heures
+**Auteur** : Ribero Tom 
+**Classe** : B2 Administrateur Système et Réseau  
 
 ---
 
