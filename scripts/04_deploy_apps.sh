@@ -1,156 +1,204 @@
 #!/bin/bash
-# 04_deploy_apps.sh
-# Script pour déployer les applications (nginx, apache, mariadb) sur le cluster
+# Script 04 : Deploy applications (Nginx, Apache, MariaDB)
+# Usage: ./04_deploy_apps.sh
+# Run from master node
 
 set -e
 
-# Couleurs
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+echo "========================================"
+echo "Deploying K3S Applications"
+echo "========================================"
 
-info() { echo -e "${GREEN}[INFO]${NC} $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-header() { echo -e "\n${BLUE}=== $1 ===${NC}\n"; }
+# Create manifests directory if not exists
+mkdir -p manifests/apps
 
-# Vérifier kubectl
-if ! command -v kubectl &> /dev/null; then
-    error "kubectl n'est pas installé"
-    exit 1
-fi
+# 1. Deploy Nginx
+echo "[*] Deploying Nginx..."
+sudo k3s kubectl apply -f - << 'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  labels:
+    app: nginx
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+  labels:
+    app: nginx
+spec:
+  type: NodePort
+  selector:
+    app: nginx
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+    nodePort: 30080
+EOF
 
-# Vérifier la connectivité du cluster
-if ! kubectl cluster-info &> /dev/null; then
-    error "Impossible de se connecter au cluster K3S"
-    exit 1
-fi
+# 2. Deploy Apache
+echo "[*] Deploying Apache..."
+sudo k3s kubectl apply -f - << 'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apache
+  labels:
+    app: apache
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: apache
+  template:
+    metadata:
+      labels:
+        app: apache
+    spec:
+      containers:
+      - name: httpd
+        image: httpd:latest
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apache-service
+  labels:
+    app: apache
+spec:
+  type: NodePort
+  selector:
+    app: apache
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+    nodePort: 30081
+EOF
 
-header "Déploiement des Applications sur K3S"
+# 3. Deploy MariaDB
+echo "[*] Deploying MariaDB..."
+sudo k3s kubectl apply -f - << 'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mariadb-init
+data:
+  init.sql: |
+    CREATE DATABASE IF NOT EXISTS appdb;
+    CREATE USER 'appuser'@'%' IDENTIFIED BY 'apppass';
+    GRANT ALL PRIVILEGES ON appdb.* TO 'appuser'@'%';
+    FLUSH PRIVILEGES;
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mariadb
+  labels:
+    app: mariadb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:latest
+        ports:
+        - containerPort: 3306
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: "rootpass"
+        - name: MYSQL_DATABASE
+          value: "appdb"
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        volumeMounts:
+        - name: mariadb-init
+          mountPath: /docker-entrypoint-initdb.d
+      volumes:
+      - name: mariadb-init
+        configMap:
+          name: mariadb-init
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb-service
+  labels:
+    app: mariadb
+spec:
+  type: ClusterIP
+  selector:
+    app: mariadb
+  ports:
+  - protocol: TCP
+    port: 3306
+    targetPort: 3306
+EOF
 
-# Configuration
-STORAGE_PATHS=("/mnt/storage/nginx" "/mnt/storage/mariadb")
-NAMESPACE="apps"
-
-# Étape 1 : Créer les répertoires de stockage sur chaque nœud
-header "Création des répertoires de stockage"
-
-NODES=$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}')
-
-for NODE in $NODES; do
-    info "Configuration du nœud : $NODE"
-    
-    # SSH dans chaque nœud et créer les répertoires
-    for PATH in "${STORAGE_PATHS[@]}"; do
-        ssh root@$NODE "mkdir -p $PATH && chmod 777 $PATH" 2>/dev/null || \
-        warn "  Impossible d'accéder à $NODE (assurez-vous SSH est configuré)"
-    done
-    
-    info "✓ Répertoires créés sur $NODE"
-done
-
-# Étape 2 : Créer le namespace
-header "Création du namespace"
-
-info "Création du namespace '$NAMESPACE'..."
-kubectl create namespace $NAMESPACE 2>/dev/null || info "  Namespace '$NAMESPACE' existe déjà"
-
-# Étape 3 : Déployer les manifests
-header "Déploiement des applications"
-
-# Vérifier que les fichiers manifests existent
-MANIFEST_DIR="./manifests"
-if [ ! -d "$MANIFEST_DIR" ]; then
-    error "Dossier manifests/$MANIFEST_DIR non trouvé"
-    error "Assurez-vous d'être dans le répertoire du projet"
-    exit 1
-fi
-
-# Déployer nginx
-info "Déploiement de Nginx..."
-if kubectl apply -f $MANIFEST_DIR/01-nginx-deployment.yaml 2>/dev/null; then
-    info "✓ Nginx déployé"
-else
-    warn "⚠ Erreur lors du déploiement de Nginx"
-fi
-
-# Déployer apache
-info "Déploiement d'Apache..."
-if kubectl apply -f $MANIFEST_DIR/03-apache-deployment.yaml 2>/dev/null; then
-    info "✓ Apache déployé"
-else
-    warn "⚠ Erreur lors du déploiement d'Apache"
-fi
-
-# Déployer mariadb
-info "Déploiement de MariaDB..."
-if kubectl apply -f $MANIFEST_DIR/02-mariadb-deployment.yaml 2>/dev/null; then
-    info "✓ MariaDB déployé"
-else
-    warn "⚠ Erreur lors du déploiement de MariaDB"
-fi
-
-# Alternative : déployer tout d'un coup
-# info "Déploiement de toutes les applications..."
-# kubectl apply -f $MANIFEST_DIR/all-in-one.yaml
-
-# Étape 4 : Attendre que les pods démarrent
-header "Attente du démarrage des pods"
-
-info "Attente de 30 secondes pour que les pods démarrent..."
+echo ""
+echo "========================================"
+echo "✅ Applications deployed!"
+echo "========================================"
+echo ""
+echo "[*] Waiting for pods to start (30 seconds)..."
 sleep 30
 
-# Étape 5 : Vérifier le statut
-header "Vérification du déploiement"
+echo ""
+echo "[*] Pod status:"
+sudo k3s kubectl get pods -o wide
 
-info "Pods dans le namespace '$NAMESPACE' :"
-kubectl get pods -n $NAMESPACE -o wide
+echo ""
+echo "[*] Service status:"
+sudo k3s kubectl get svc
 
-info "Services dans le namespace '$NAMESPACE' :"
-kubectl get svc -n $NAMESPACE
-
-info "PersistentVolumeClaims :"
-kubectl get pvc -n $NAMESPACE
-
-# Étape 6 : Afficher les URLs d'accès
-header "URLs d'accès aux applications"
-
-# Récupérer les adresses IP des nœuds
-MASTER_IP=$(kubectl get nodes -o wide | tail -n +2 | head -1 | awk '{print $6}')
-
-echo "Applications disponibles à :"
 echo ""
-echo "  Nginx  : http://${MASTER_IP}:80"
-echo "           (ou utilisez: kubectl port-forward svc/nginx-service 8080:80 -n apps)"
-echo ""
-echo "  Apache : http://${MASTER_IP}:80"
-echo "           (ou utilisez: kubectl port-forward svc/apache-service 8081:80 -n apps)"
-echo ""
-echo "  MariaDB: ${MASTER_IP}:3306"
-echo "           (ou utilisez: kubectl port-forward svc/mariadb-service 3306:3306 -n apps)"
-echo ""
-
-# Résumé
-header "Déploiement terminé"
-
-echo "Prochaines étapes :"
-echo ""
-echo "1. Vérifier les logs d'un pod :"
-echo "   kubectl logs <pod-name> -n apps"
-echo ""
-echo "2. Entrer dans un pod :"
-echo "   kubectl exec -it <pod-name> -n apps -- /bin/bash"
-echo ""
-echo "3. Tester la connectivité :"
-echo "   kubectl exec <nginx-pod> -n apps -- curl http://localhost"
-echo ""
-echo "4. Voir les événements :"
-echo "   kubectl get events -n apps"
-echo ""
-echo "5. Tester MariaDB :"
-echo "   kubectl exec <mariadb-pod> -n apps -- mysql -u root -proot123 -e 'SHOW DATABASES;'"
-echo ""
-
-info "Applications déployées avec succès ! ✓"
+echo "Test access:"
+echo "  Nginx: curl http://localhost:30080"
+echo "  Apache: curl http://localhost:30081"
+echo "  MariaDB: kubectl exec -it deployment/mariadb -- mysql -u root -prootpass"
